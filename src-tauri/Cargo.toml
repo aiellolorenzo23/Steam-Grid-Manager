@@ -1,0 +1,19 @@
+[package]
+name = "steam-grid-manager"
+version = "0.1.0"
+description = "Steam Grid Manager"
+authors = ["Steam Grid Manager"]
+edition = "2021"
+
+[lib]
+name = "steam_grid_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["protocol-asset"] }

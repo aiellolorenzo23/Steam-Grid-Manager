@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Steam Grid Manager</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><img src="/steamgriddb-logo.svg" alt="" /></div>
+          <div>
+            <strong>Steam Grid</strong>
+            <span>Manager</span>
+          </div>
+        </div>
+
+        <div class="active-account">
+          <span>Profilo Steam</span>
+          <strong id="activeAccount">Rilevamento...</strong>
+        </div>
+
+        <section class="settings-panel">
+          <div class="panel-title">
+            <strong>Impostazioni</strong>
+            <span id="settingsStatus"></span>
+          </div>
+          <label class="field">
+            <span>SteamGridDB API key</span>
+            <input id="apiKey" type="password" placeholder="Bearer API key" />
+          </label>
+          <label class="field">
+            <span>Steam Web API key</span>
+            <input id="steamApiKey" type="password" placeholder="Steam Web API key" />
+          </label>
+          <label class="check-row">
+            <input id="includeOwnedLibrary" type="checkbox" />
+            <span>Tutta la libreria Steam</span>
+          </label>
+          <label class="check-row">
+            <input id="showApiKey" type="checkbox" />
+            <span>Mostra key</span>
+          </label>
+          <button id="saveSettings" class="secondary">Salva</button>
+        </section>
+
+        <nav class="nav-group" id="libraryNav"></nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <label class="path-field">
+            <span>Steam</span>
+            <input id="steamPath" value="C:\Program Files (x86)\Steam" />
+          </label>
+          <button id="scanButton">Scansiona</button>
+          <div class="sync-card">
+            <strong id="syncTitle">Pronto</strong>
+            <span id="syncSubtitle">Impostazioni e libreria locale</span>
+          </div>
+        </header>
+
+        <section class="hero-panel">
+          <div>
+            <p id="kicker">Libreria locale</p>
+            <h1 id="heroTitle">Steam Grid Manager</h1>
+            <p id="heroSubtitle">Scansiona Steam, scegli un gioco e applica artwork da SteamGridDB.</p>
+          </div>
+          <div class="stats">
+            <div><strong id="steamCount">0</strong><span>Steam</span></div>
+            <div><strong id="nonSteamCount">0</strong><span>Non-Steam</span></div>
+            <div><strong id="libraryCount">0</strong><span>Librerie</span></div>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <div class="library-panel">
+            <div class="toolbar">
+              <input id="gameSearch" placeholder="Cerca gioco" />
+              <select id="typeFilter">
+                <option value="all">Tutti</option>
+                <option value="steam">Steam</option>
+                <option value="owned">Non installati</option>
+                <option value="non-steam">Non-Steam</option>
+              </select>
+            </div>
+            <div id="gameGrid" class="game-grid"></div>
+          </div>
+
+          <aside class="detail-panel">
+            <div id="emptyState" class="empty-state">
+              <strong>Seleziona un gioco</strong>
+              <span>Qui compariranno artwork, filtri e azioni.</span>
+            </div>
+
+            <div id="gameDetail" class="game-detail hidden">
+              <div>
+                <p id="selectedType"></p>
+                <h2 id="selectedName"></h2>
+                <span id="selectedMeta"></span>
+              </div>
+              <div class="existing-artwork">
+                <div id="selectedPreview" class="selected-preview"></div>
+                <div class="asset-state">
+                  <span id="coverState">Cover</span>
+                  <span id="heroState">Hero</span>
+                  <span id="logoState">Logo</span>
+                  <span id="iconState">Icona</span>
+                </div>
+              </div>
+
+              <div class="asset-tabs">
+                <button class="asset-tab active" data-asset="grids">Cover</button>
+                <button class="asset-tab" data-asset="heroes">Hero</button>
+                <button class="asset-tab" data-asset="logos">Logo</button>
+                <button class="asset-tab" data-asset="icons">Icona</button>
+              </div>
+
+              <button id="searchArtwork">Cerca su SteamGridDB</button>
+              <div id="artworkStatus" class="artwork-status"></div>
+              <div id="artworkGrid" class="artwork-grid"></div>
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
