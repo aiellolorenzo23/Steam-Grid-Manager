@@ -268,7 +268,7 @@ select {
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -460,7 +460,7 @@ select {
 
 .asset-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
 }
 
@@ -514,4 +514,207 @@ select {
 
 .art-card button {
   min-height: 32px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 8, 12, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1480px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  border: 1px solid rgba(102, 192, 244, 0.28);
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(21, 31, 42, 0.98), rgba(12, 19, 27, 0.98)),
+    var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+
+.modal-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 18px;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.modal-header h2,
+.modal-header p,
+.modal-header span {
+  min-width: 0;
+  margin: 0;
+}
+
+.modal-header h2 {
+  grid-column: 1;
+  overflow: hidden;
+  font-size: 28px;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-header p,
+.modal-header span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.modal-header button {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.current-assets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.asset-preview {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.asset-preview.present {
+  border-color: rgba(139, 197, 63, 0.36);
+}
+
+.asset-preview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-preview small {
+  color: var(--muted);
+}
+
+.asset-preview div {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  background:
+    linear-gradient(140deg, rgba(102, 192, 244, 0.18), rgba(139, 197, 63, 0.1)),
+    #182432;
+}
+
+.asset-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.asset-preview span {
+  padding: 12px;
+  text-align: center;
+  font-weight: 800;
+}
+
+.asset-preview[data-kind="gridVertical"] div {
+  aspect-ratio: 2 / 3;
+}
+
+.asset-preview[data-kind="gridHorizontal"] div {
+  aspect-ratio: 92 / 43;
+}
+
+.asset-preview[data-kind="heroes"] {
+  grid-column: 1 / -1;
+}
+
+.asset-preview[data-kind="heroes"] div {
+  aspect-ratio: 16 / 5;
+}
+
+.asset-preview[data-kind="logos"] div,
+.asset-preview[data-kind="icons"] div {
+  aspect-ratio: 1 / 1;
+}
+
+.asset-preview[data-kind="logos"] img,
+.asset-preview[data-kind="icons"] img {
+  object-fit: contain;
+  padding: 10px;
+}
+
+.asset-workbench {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, max-content) minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.filter-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.filter-row input {
+  width: 16px;
+  min-height: 16px;
+  accent-color: var(--accent);
+}
+
+.asset-workbench .artwork-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  max-height: none;
+  min-height: 0;
+}
+
+.art-card[data-asset="gridHorizontal"] img {
+  aspect-ratio: 92 / 43;
+}
+
+.art-card[data-asset="gridVertical"] img {
+  aspect-ratio: 2 / 3;
 }

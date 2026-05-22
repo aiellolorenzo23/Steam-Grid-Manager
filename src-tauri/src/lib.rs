@@ -62,7 +62,10 @@ struct Game {
 
 #[derive(Debug, Default, Serialize)]
 struct Artwork {
-    cover: String,
+    #[serde(rename = "gridVertical")]
+    grid_vertical: String,
+    #[serde(rename = "gridHorizontal")]
+    grid_horizontal: String,
     hero: String,
     logo: String,
     icon: String,
@@ -104,6 +107,21 @@ struct ApplyArtworkRequest {
     asset_type: String,
     #[serde(rename = "imageUrl")]
     image_url: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SgdbSearchOptions {
+    #[serde(rename = "apiKey")]
+    api_key: String,
+    query: String,
+    #[serde(rename = "steamAppId")]
+    steam_app_id: String,
+    #[serde(rename = "assetType")]
+    asset_type: String,
+    tags: Vec<String>,
+    mimes: Vec<String>,
+    dimensions: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -301,24 +319,20 @@ async fn scan_steam(options: ScanOptions) -> Result<ScanResult, String> {
 }
 
 #[tauri::command]
-async fn search_steam_grid_db(
-    api_key: String,
-    query: String,
-    steam_app_id: String,
-    asset_type: String,
-) -> Result<Value, String> {
-    if api_key.trim().is_empty() {
+async fn search_steam_grid_db(options: SgdbSearchOptions) -> Result<Value, String> {
+    if options.api_key.trim().is_empty() {
         return Err("SteamGridDB API key mancante.".to_string());
     }
 
-    let safe_asset_type = match asset_type.as_str() {
-        "grids" | "heroes" | "logos" | "icons" => asset_type,
+    let safe_asset_type = match options.asset_type.as_str() {
+        "gridVertical" | "gridHorizontal" | "grids" => "grids".to_string(),
+        "heroes" | "logos" | "icons" => options.asset_type.clone(),
         _ => "grids".to_string(),
     };
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|err| err.to_string())?,
+        HeaderValue::from_str(&format!("Bearer {}", options.api_key)).map_err(|err| err.to_string())?,
     );
     let client = reqwest::Client::builder()
         .default_headers(headers)
@@ -328,12 +342,12 @@ async fn search_steam_grid_db(
     let mut game = Value::Null;
     let mut assets = Vec::new();
 
-    if !steam_app_id.trim().is_empty() {
+    if !options.steam_app_id.trim().is_empty() {
         let route = format!(
             "https://www.steamgriddb.com/api/v2/{}/steam/{}",
-            safe_asset_type, steam_app_id
+            safe_asset_type, options.steam_app_id
         );
-        if let Ok(value) = sgdb_get(&client, &route).await {
+        if let Ok(value) = sgdb_get(&client, &route, &options.tags, &options.mimes, &options.dimensions).await {
             assets = value
                 .get("data")
                 .and_then(Value::as_array)
@@ -342,12 +356,12 @@ async fn search_steam_grid_db(
         }
     }
 
-    if assets.is_empty() && !query.trim().is_empty() {
+    if assets.is_empty() && !options.query.trim().is_empty() {
         let route = format!(
             "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
-            query.replace(' ', "%20")
+            options.query.replace(' ', "%20")
         );
-        let search = sgdb_get(&client, &route).await?;
+        let search = sgdb_get(&client, &route, &[], &[], &[]).await?;
         game = search
             .get("data")
             .and_then(Value::as_array)
@@ -360,7 +374,7 @@ async fn search_steam_grid_db(
                 "https://www.steamgriddb.com/api/v2/{}/game/{}",
                 safe_asset_type, game_id
             );
-            let by_game = sgdb_get(&client, &route).await?;
+            let by_game = sgdb_get(&client, &route, &options.tags, &options.mimes, &options.dimensions).await?;
             assets = by_game
                 .get("data")
                 .and_then(Value::as_array)
@@ -432,8 +446,28 @@ fn settings_path() -> Result<PathBuf, String> {
         .join("settings.json"))
 }
 
-async fn sgdb_get(client: &reqwest::Client, url: &str) -> Result<Value, String> {
-    let response = client.get(url).send().await.map_err(|err| err.to_string())?;
+async fn sgdb_get(
+    client: &reqwest::Client,
+    url: &str,
+    tags: &[String],
+    mimes: &[String],
+    dimensions: &[String],
+) -> Result<Value, String> {
+    let mut request = client.get(url);
+    let mut query = Vec::new();
+    if !tags.is_empty() {
+        query.push(("oneoftag", tags.join(",")));
+    }
+    if !mimes.is_empty() {
+        query.push(("mimes", mimes.join(",")));
+    }
+    if !dimensions.is_empty() {
+        query.push(("dimensions", dimensions.join(",")));
+    }
+    if !query.is_empty() {
+        request = request.query(&query);
+    }
+    let response = request.send().await.map_err(|err| err.to_string())?;
     let status = response.status();
     let value = response.json::<Value>().await.map_err(|err| err.to_string())?;
     if !status.is_success() {
@@ -711,9 +745,13 @@ fn hydrate_artwork(steam_path: &Path, user_id: &str, games: &mut [Game]) {
             .join("config")
             .join("grid");
         game.artwork = Artwork {
-            cover: first_existing(vec![
+            grid_vertical: first_existing(vec![
                 find_artwork(&grid_dir, &format!("{}p", game.grid_id)),
                 find_steam_cache_artwork(steam_path, &game.app_id, "library_600x900"),
+            ]),
+            grid_horizontal: first_existing(vec![
+                find_artwork(&grid_dir, &game.grid_id),
+                find_steam_cache_artwork(steam_path, &game.app_id, "library_header"),
             ]),
             hero: first_existing(vec![
                 find_artwork(&grid_dir, &format!("{}_hero", game.grid_id)),
@@ -915,6 +953,8 @@ fn crc32(input: &[u8]) -> u32 {
 
 fn artwork_filename(grid_id: &str, asset_type: &str, ext: &str) -> String {
     match asset_type {
+        "gridVertical" => format!("{}p{}", grid_id, ext),
+        "gridHorizontal" => format!("{}{}", grid_id, ext),
         "heroes" => format!("{}_hero{}", grid_id, ext),
         "logos" => format!("{}_logo{}", grid_id, ext),
         "icons" => format!("{}_icon{}", grid_id, ext),

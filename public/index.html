@@ -88,43 +88,75 @@
             </div>
             <div id="gameGrid" class="game-grid"></div>
           </div>
-
-          <aside class="detail-panel">
-            <div id="emptyState" class="empty-state">
-              <strong>Seleziona un gioco</strong>
-              <span>Qui compariranno artwork, filtri e azioni.</span>
-            </div>
-
-            <div id="gameDetail" class="game-detail hidden">
-              <div>
-                <p id="selectedType"></p>
-                <h2 id="selectedName"></h2>
-                <span id="selectedMeta"></span>
-              </div>
-              <div class="existing-artwork">
-                <div id="selectedPreview" class="selected-preview"></div>
-                <div class="asset-state">
-                  <span id="coverState">Cover</span>
-                  <span id="heroState">Hero</span>
-                  <span id="logoState">Logo</span>
-                  <span id="iconState">Icona</span>
-                </div>
-              </div>
-
-              <div class="asset-tabs">
-                <button class="asset-tab active" data-asset="grids">Cover</button>
-                <button class="asset-tab" data-asset="heroes">Hero</button>
-                <button class="asset-tab" data-asset="logos">Logo</button>
-                <button class="asset-tab" data-asset="icons">Icona</button>
-              </div>
-
-              <button id="searchArtwork">Cerca su SteamGridDB</button>
-              <div id="artworkStatus" class="artwork-status"></div>
-              <div id="artworkGrid" class="artwork-grid"></div>
-            </div>
-          </aside>
         </section>
       </main>
+    </div>
+
+    <div id="gameModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-panel">
+        <header class="modal-header">
+          <div>
+            <p id="selectedType"></p>
+            <h2 id="selectedName"></h2>
+            <span id="selectedMeta"></span>
+          </div>
+          <button id="closeModal" class="secondary">Chiudi</button>
+        </header>
+
+        <section class="modal-body">
+          <div class="current-assets">
+            <article class="asset-preview" data-kind="gridVertical">
+              <strong>Grid verticale</strong>
+              <small>Grid verticale assente</small>
+              <div id="previewGridVertical"></div>
+            </article>
+            <article class="asset-preview" data-kind="gridHorizontal">
+              <strong>Grid orizzontale</strong>
+              <small>Grid orizzontale assente</small>
+              <div id="previewGridHorizontal"></div>
+            </article>
+            <article class="asset-preview" data-kind="heroes">
+              <strong>Hero</strong>
+              <small>Hero assente</small>
+              <div id="previewHero"></div>
+            </article>
+            <article class="asset-preview" data-kind="logos">
+              <strong>Logo</strong>
+              <small>Logo assente</small>
+              <div id="previewLogo"></div>
+            </article>
+            <article class="asset-preview" data-kind="icons">
+              <strong>Icona</strong>
+              <small>Icona assente</small>
+              <div id="previewIcon"></div>
+            </article>
+          </div>
+
+          <div class="asset-workbench">
+            <div class="asset-tabs">
+              <button class="asset-tab active" data-asset="gridVertical">Grid V</button>
+              <button class="asset-tab" data-asset="gridHorizontal">Grid H</button>
+              <button class="asset-tab" data-asset="heroes">Hero</button>
+              <button class="asset-tab" data-asset="logos">Logo</button>
+              <button class="asset-tab" data-asset="icons">Icona</button>
+            </div>
+
+            <div class="filter-row">
+              <label class="check-row"><input id="filterAnimated" type="checkbox" /><span>Animate</span></label>
+              <label class="check-row"><input id="filterNsfw" type="checkbox" /><span>NSFW</span></label>
+              <label class="check-row"><input id="filterHumor" type="checkbox" /><span>Humor</span></label>
+              <label class="check-row"><input id="filterEpilepsy" type="checkbox" /><span>Epilepsy</span></label>
+              <select id="dimensionFilter">
+                <option value="">Dimensioni automatiche</option>
+              </select>
+              <button id="searchArtwork">Cerca su SteamGridDB</button>
+            </div>
+
+            <div id="artworkStatus" class="artwork-status"></div>
+            <div id="artworkGrid" class="artwork-grid"></div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <script src="/app.js"></script>

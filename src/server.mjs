@@ -58,8 +58,11 @@ async function handleApi(url, req, res) {
     const apiKey = url.searchParams.get("apiKey") || "";
     const query = url.searchParams.get("q") || "";
     const steamAppId = url.searchParams.get("steamAppId") || "";
-    const assetType = url.searchParams.get("assetType") || "grids";
-    sendJson(res, 200, await searchSteamGridDb({ apiKey, query, steamAppId, assetType }));
+    const assetType = url.searchParams.get("assetType") || "gridVertical";
+    const tags = csvParam(url.searchParams.get("tags") || "");
+    const mimes = csvParam(url.searchParams.get("mimes") || "");
+    const dimensions = csvParam(url.searchParams.get("dimensions") || "");
+    sendJson(res, 200, await searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags, mimes, dimensions }));
     return;
   }
 
@@ -319,9 +322,13 @@ function hydrateArtwork(steamPath, userId, games) {
   const gridDir = path.join(steamPath, "userdata", String(userId), "config", "grid");
   for (const game of games) {
     game.artwork = {
-      cover: firstExisting([
+      gridVertical: firstExisting([
         findArtwork(gridDir, `${game.gridId}p`),
         findSteamCacheArtwork(steamPath, game.appId, "library_600x900")
+      ]),
+      gridHorizontal: firstExisting([
+        findArtwork(gridDir, `${game.gridId}`),
+        findSteamCacheArtwork(steamPath, game.appId, "library_header")
       ]),
       hero: firstExisting([
         findArtwork(gridDir, `${game.gridId}_hero`),
@@ -383,18 +390,18 @@ function firstExisting(paths) {
 }
 
 function emptyArtwork() {
-  return { cover: "", hero: "", logo: "", icon: "" };
+  return { gridVertical: "", gridHorizontal: "", hero: "", logo: "", icon: "" };
 }
 
-async function searchSteamGridDb({ apiKey, query, steamAppId, assetType }) {
+async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = [], mimes = [], dimensions = [] }) {
   if (!apiKey) throw new Error("SteamGridDB API key mancante.");
-  const safeAssetType = ["grids", "heroes", "logos", "icons"].includes(assetType) ? assetType : "grids";
+  const safeAssetType = ["gridVertical", "gridHorizontal", "grids"].includes(assetType) ? "grids" : (["heroes", "logos", "icons"].includes(assetType) ? assetType : "grids");
   const headers = { Authorization: `Bearer ${apiKey}` };
   let game = null;
   let assets = [];
 
   if (steamAppId) {
-    const direct = await sgdbFetch(`/api/v2/${safeAssetType}/steam/${encodeURIComponent(steamAppId)}`, headers);
+    const direct = await sgdbFetch(`/api/v2/${safeAssetType}/steam/${encodeURIComponent(steamAppId)}`, headers, { tags, mimes, dimensions });
     if (direct.success) assets = direct.data || [];
   }
 
@@ -402,7 +409,7 @@ async function searchSteamGridDb({ apiKey, query, steamAppId, assetType }) {
     const search = await sgdbFetch(`/api/v2/search/autocomplete/${encodeURIComponent(query)}`, headers);
     game = search.data?.[0] || null;
     if (game?.id) {
-      const byGame = await sgdbFetch(`/api/v2/${safeAssetType}/game/${game.id}`, headers);
+      const byGame = await sgdbFetch(`/api/v2/${safeAssetType}/game/${game.id}`, headers, { tags, mimes, dimensions });
       if (byGame.success) assets = byGame.data || [];
     }
   }
@@ -410,8 +417,13 @@ async function searchSteamGridDb({ apiKey, query, steamAppId, assetType }) {
   return { game, assets: assets.slice(0, 80) };
 }
 
-async function sgdbFetch(route, headers) {
-  const response = await fetch(`https://www.steamgriddb.com${route}`, { headers });
+async function sgdbFetch(route, headers, filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.tags?.length) params.set("oneoftag", filters.tags.join(","));
+  if (filters.mimes?.length) params.set("mimes", filters.mimes.join(","));
+  if (filters.dimensions?.length) params.set("dimensions", filters.dimensions.join(","));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`https://www.steamgriddb.com${route}${suffix}`, { headers });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(json.errors?.[0] || json.error || `SteamGridDB HTTP ${response.status}`);
@@ -445,10 +457,16 @@ async function applyArtwork(body) {
 }
 
 function artworkFilename(gridId, assetType, ext) {
+  if (assetType === "gridHorizontal") return `${gridId}${ext}`;
+  if (assetType === "gridVertical") return `${gridId}p${ext}`;
   if (assetType === "heroes") return `${gridId}_hero${ext}`;
   if (assetType === "logos") return `${gridId}_logo${ext}`;
   if (assetType === "icons") return `${gridId}_icon${ext}`;
   return `${gridId}p${ext}`;
+}
+
+function csvParam(value) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function parseKeyValueVdf(text) {

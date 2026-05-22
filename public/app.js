@@ -1,10 +1,43 @@
+const ASSETS = {
+  gridVertical: {
+    label: "Grid verticale",
+    key: "gridVertical",
+    previewId: "previewGridVertical",
+    dimensions: ["600x900", "342x482"]
+  },
+  gridHorizontal: {
+    label: "Grid orizzontale",
+    key: "gridHorizontal",
+    previewId: "previewGridHorizontal",
+    dimensions: ["920x430", "460x215"]
+  },
+  heroes: {
+    label: "Hero",
+    key: "hero",
+    previewId: "previewHero",
+    dimensions: ["1920x620", "3840x1240"]
+  },
+  logos: {
+    label: "Logo",
+    key: "logo",
+    previewId: "previewLogo",
+    dimensions: []
+  },
+  icons: {
+    label: "Icona",
+    key: "icon",
+    previewId: "previewIcon",
+    dimensions: ["512x512", "256x256", "128x128", "32x32"]
+  }
+};
+
 const state = {
   steamPath: "C:\\Program Files (x86)\\Steam",
   selectedUserId: "",
   selectedLibrary: "all",
   selectedType: "all",
   selectedGame: null,
-  assetType: "grids",
+  assetType: "gridVertical",
   games: [],
   libraries: [],
   accounts: []
@@ -31,16 +64,16 @@ const els = {
   libraryCount: document.querySelector("#libraryCount"),
   heroTitle: document.querySelector("#heroTitle"),
   heroSubtitle: document.querySelector("#heroSubtitle"),
-  emptyState: document.querySelector("#emptyState"),
-  gameDetail: document.querySelector("#gameDetail"),
+  gameModal: document.querySelector("#gameModal"),
+  closeModal: document.querySelector("#closeModal"),
   selectedType: document.querySelector("#selectedType"),
   selectedName: document.querySelector("#selectedName"),
   selectedMeta: document.querySelector("#selectedMeta"),
-  selectedPreview: document.querySelector("#selectedPreview"),
-  coverState: document.querySelector("#coverState"),
-  heroState: document.querySelector("#heroState"),
-  logoState: document.querySelector("#logoState"),
-  iconState: document.querySelector("#iconState"),
+  filterAnimated: document.querySelector("#filterAnimated"),
+  filterNsfw: document.querySelector("#filterNsfw"),
+  filterHumor: document.querySelector("#filterHumor"),
+  filterEpilepsy: document.querySelector("#filterEpilepsy"),
+  dimensionFilter: document.querySelector("#dimensionFilter"),
   searchArtwork: document.querySelector("#searchArtwork"),
   artworkStatus: document.querySelector("#artworkStatus"),
   artworkGrid: document.querySelector("#artworkGrid")
@@ -54,6 +87,13 @@ els.typeFilter.addEventListener("change", () => {
 });
 els.searchArtwork.addEventListener("click", searchArtwork);
 els.saveSettings.addEventListener("click", saveSettings);
+els.closeModal.addEventListener("click", closeGameModal);
+els.gameModal.addEventListener("click", (event) => {
+  if (event.target === els.gameModal) closeGameModal();
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.gameModal.classList.contains("hidden")) closeGameModal();
+});
 els.showApiKey.addEventListener("change", () => {
   els.apiKey.type = els.showApiKey.checked ? "text" : "password";
   els.steamApiKey.type = els.showApiKey.checked ? "text" : "password";
@@ -65,12 +105,16 @@ els.steamPath.addEventListener("change", () => {
 els.apiKey.addEventListener("input", () => setSettingsStatus("Da salvare"));
 els.steamApiKey.addEventListener("input", () => setSettingsStatus("Da salvare"));
 els.includeOwnedLibrary.addEventListener("change", () => setSettingsStatus("Da salvare"));
+els.dimensionFilter.addEventListener("change", () => {
+  if (state.selectedGame) els.artworkStatus.textContent = "";
+});
 
 document.querySelectorAll(".asset-tab").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".asset-tab").forEach((tab) => tab.classList.remove("active"));
     button.classList.add("active");
     state.assetType = button.dataset.asset;
+    renderDimensionOptions();
     els.artworkGrid.innerHTML = "";
     els.artworkStatus.textContent = "";
   });
@@ -79,6 +123,7 @@ document.querySelectorAll(".asset-tab").forEach((button) => {
 initApp();
 
 async function initApp() {
+  renderDimensionOptions();
   await loadSettings();
   await scan();
 }
@@ -108,6 +153,8 @@ async function saveSettings() {
     };
     const saved = await settingsBackend("save_settings", { settings });
     els.apiKey.value = saved.apiKey || "";
+    els.steamApiKey.value = saved.steamApiKey || "";
+    els.includeOwnedLibrary.checked = Boolean(saved.includeOwnedLibrary);
     els.steamPath.value = saved.steamPath || settings.steamPath;
     state.steamPath = els.steamPath.value;
     setSettingsStatus("Salvato");
@@ -144,9 +191,13 @@ async function scan() {
     els.steamCount.textContent = data.counts?.steam ?? 0;
     els.nonSteamCount.textContent = data.counts?.nonSteam ?? 0;
     els.libraryCount.textContent = data.counts?.libraries ?? 0;
+    if (state.selectedGame) {
+      state.selectedGame = state.games.find((game) => game.id === state.selectedGame.id) || null;
+    }
     renderAccounts();
     renderLibraries();
     renderGames();
+    if (state.selectedGame) renderModal();
     setHero("Libreria scansionata", `${state.games.length} giochi trovati in ${state.libraries.length} librerie.`);
     if (wantsOwnedLibrary && !steamApiKey) {
       setSync("Steam API key mancante", "Aggiungila nelle impostazioni e salva");
@@ -213,54 +264,68 @@ function renderGames() {
     return libraryOk && typeOk && searchOk;
   });
 
-  els.gameGrid.innerHTML = games.map((game) => `
-    <article class="game-card ${state.selectedGame?.id === game.id ? "active" : ""}" data-id="${escapeAttr(game.id)}">
-      <div class="poster ${game.artwork?.cover ? "has-artwork" : ""}">${game.artwork?.cover ? `<img src="${escapeAttr(localArtworkUrl(game.artwork.cover))}" alt="">` : `<span>${escapeHtml(initials(game.name))}</span>`}</div>
-      <footer>
-        <strong>${escapeHtml(game.name)}</strong>
-        <small>${escapeHtml(game.libraryLabel)}</small>
-      </footer>
-    </article>
-  `).join("");
+  els.gameGrid.innerHTML = games.map((game) => {
+    const poster = game.artwork?.gridVertical || game.artwork?.gridHorizontal || "";
+    return `
+      <article class="game-card ${state.selectedGame?.id === game.id ? "active" : ""}" data-id="${escapeAttr(game.id)}">
+        <div class="poster ${poster ? "has-artwork" : ""}">${poster ? `<img src="${escapeAttr(localArtworkUrl(poster))}" alt="">` : `<span>${escapeHtml(initials(game.name))}</span>`}</div>
+        <footer>
+          <strong>${escapeHtml(game.name)}</strong>
+          <small>${escapeHtml(game.libraryLabel)}</small>
+        </footer>
+      </article>
+    `;
+  }).join("");
 
   els.gameGrid.querySelectorAll(".game-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      state.selectedGame = state.games.find((game) => game.id === card.dataset.id);
-      renderGames();
-      renderDetail();
-    });
+    card.addEventListener("click", () => openGameModal(card.dataset.id));
   });
 }
 
-function renderDetail() {
-  const game = state.selectedGame;
-  if (!game) return;
-  els.emptyState.classList.add("hidden");
-  els.gameDetail.classList.remove("hidden");
-  els.selectedType.textContent = game.type === "steam" ? `Steam AppID ${game.appId}` : `Non-Steam ID ${game.gridId}`;
-  if (game.type === "owned") els.selectedType.textContent = `Steam AppID ${game.appId}`;
-  els.selectedName.textContent = game.name;
-  els.selectedMeta.textContent = game.type === "steam" ? game.libraryPath : game.exe || "Shortcut locale";
-  if (game.type === "owned") els.selectedMeta.textContent = "Non installato";
-  renderExistingArtwork(game);
+function openGameModal(gameId) {
+  state.selectedGame = state.games.find((game) => game.id === gameId) || null;
+  if (!state.selectedGame) return;
+  els.gameModal.classList.remove("hidden");
+  renderGames();
+  renderModal();
+}
+
+function closeGameModal() {
+  els.gameModal.classList.add("hidden");
   els.artworkGrid.innerHTML = "";
   els.artworkStatus.textContent = "";
 }
 
-function renderExistingArtwork(game) {
-  const cover = game.artwork?.cover || "";
-  els.selectedPreview.innerHTML = cover
-    ? `<img src="${escapeAttr(localArtworkUrl(cover))}" alt="">`
-    : `<span>${escapeHtml(initials(game.name))}</span>`;
-  setAssetState(els.coverState, "Cover", game.artwork?.cover);
-  setAssetState(els.heroState, "Hero", game.artwork?.hero);
-  setAssetState(els.logoState, "Logo", game.artwork?.logo);
-  setAssetState(els.iconState, "Icona", game.artwork?.icon);
+function renderModal() {
+  const game = state.selectedGame;
+  if (!game) return;
+  els.selectedType.textContent = game.type === "non-steam" ? `Non-Steam ID ${game.gridId}` : `Steam AppID ${game.appId}`;
+  els.selectedName.textContent = game.name;
+  els.selectedMeta.textContent = game.type === "owned" ? "Non installato" : (game.libraryPath || game.exe || "Shortcut locale");
+  renderExistingArtwork(game);
 }
 
-function setAssetState(element, label, value) {
-  element.textContent = value ? `${label} presente` : `${label} assente`;
-  element.classList.toggle("present", Boolean(value));
+function renderExistingArtwork(game) {
+  Object.entries(ASSETS).forEach(([assetType, config]) => {
+    const frame = document.querySelector(`#${config.previewId}`);
+    const preview = frame.closest(".asset-preview");
+    const value = game.artwork?.[config.key] || "";
+    const label = value ? `${config.label} presente` : `${config.label} assente`;
+    preview.classList.toggle("present", Boolean(value));
+    preview.querySelector("strong").textContent = config.label;
+    preview.querySelector("small").textContent = label;
+    frame.innerHTML = value
+      ? `<img src="${escapeAttr(localArtworkUrl(value))}" alt="">`
+      : `<span>${escapeHtml(assetPlaceholder(assetType, game.name))}</span>`;
+  });
+}
+
+function renderDimensionOptions() {
+  const dimensions = ASSETS[state.assetType]?.dimensions || [];
+  els.dimensionFilter.innerHTML = [
+    `<option value="">Dimensioni automatiche</option>`,
+    ...dimensions.map((dimension) => `<option value="${escapeAttr(dimension)}">${escapeHtml(dimension)}</option>`)
+  ].join("");
 }
 
 async function searchArtwork() {
@@ -272,7 +337,8 @@ async function searchArtwork() {
     return;
   }
 
-  els.artworkStatus.textContent = "Ricerca artwork...";
+  const filters = buildSgdbFilters();
+  els.artworkStatus.textContent = `Ricerca ${assetLabel(state.assetType).toLowerCase()}...`;
   els.artworkGrid.innerHTML = "";
   try {
     const params = new URLSearchParams({
@@ -280,14 +346,22 @@ async function searchArtwork() {
       q: game.name,
       assetType: state.assetType
     });
-    if (game.type === "steam") params.set("steamAppId", game.appId);
+    if (game.type === "steam" || game.type === "owned") params.set("steamAppId", game.appId);
+    if (filters.tags.length) params.set("tags", filters.tags.join(","));
+    if (filters.mimes.length) params.set("mimes", filters.mimes.join(","));
+    if (filters.dimensions.length) params.set("dimensions", filters.dimensions.join(","));
     const data = await callBackend(
       "search_steam_grid_db",
       {
-        apiKey,
-        query: game.name,
-        steamAppId: game.type === "steam" ? game.appId : "",
-        assetType: state.assetType
+        options: {
+          apiKey,
+          query: game.name,
+          steamAppId: game.type === "steam" || game.type === "owned" ? game.appId : "",
+          assetType: state.assetType,
+          tags: filters.tags,
+          mimes: filters.mimes,
+          dimensions: filters.dimensions
+        }
       },
       `/api/sgdb/search?${params.toString()}`
     );
@@ -296,6 +370,18 @@ async function searchArtwork() {
   } catch (error) {
     els.artworkStatus.textContent = error.message;
   }
+}
+
+function buildSgdbFilters() {
+  const tags = [];
+  const mimes = [];
+  const dimensions = [];
+  if (els.filterNsfw.checked) tags.push("nsfw");
+  if (els.filterHumor.checked) tags.push("humor");
+  if (els.filterEpilepsy.checked) tags.push("epilepsy");
+  if (els.filterAnimated.checked) mimes.push("image/webp");
+  if (els.dimensionFilter.value) dimensions.push(els.dimensionFilter.value);
+  return { tags, mimes, dimensions };
 }
 
 function renderArtwork(assets) {
@@ -338,27 +424,24 @@ async function applyArtwork(imageUrl) {
 
 function updateSelectedArtwork(target) {
   if (!state.selectedGame || !target) return;
-  const key = assetArtworkKey(state.assetType);
+  const key = ASSETS[state.assetType]?.key || "gridVertical";
   state.selectedGame.artwork = state.selectedGame.artwork || {};
   state.selectedGame.artwork[key] = target;
   const game = state.games.find((item) => item.id === state.selectedGame.id);
   if (game) game.artwork = state.selectedGame.artwork;
-  renderDetail();
+  renderModal();
   renderGames();
 }
 
-function assetArtworkKey(assetType) {
-  if (assetType === "heroes") return "hero";
-  if (assetType === "logos") return "logo";
-  if (assetType === "icons") return "icon";
-  return "cover";
+function assetLabel(assetType) {
+  return ASSETS[assetType]?.label || "Artwork";
 }
 
-function assetLabel(assetType) {
-  if (assetType === "heroes") return "Hero";
+function assetPlaceholder(assetType, name) {
   if (assetType === "logos") return "Logo";
   if (assetType === "icons") return "Icona";
-  return "Cover";
+  if (assetType === "heroes") return "Hero";
+  return initials(name);
 }
 
 async function callBackend(command, tauriArgs, httpUrl, httpBody) {
