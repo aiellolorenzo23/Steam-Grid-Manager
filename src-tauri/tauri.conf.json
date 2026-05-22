@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: asset:; connect-src 'self' https://www.steamgriddb.com https://cdn2.steamgriddb.com; img-src 'self' https://cdn2.steamgriddb.com https://www.steamgriddb.com data: asset:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self' tauri: asset: http://asset.localhost https://asset.localhost; connect-src 'self' https://www.steamgriddb.com https://cdn2.steamgriddb.com; img-src 'self' https://cdn2.steamgriddb.com https://www.steamgriddb.com data: asset: http://asset.localhost https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
         "scope": [
