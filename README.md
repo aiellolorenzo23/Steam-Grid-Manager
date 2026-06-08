@@ -4,47 +4,47 @@
 
 # Steam Grid Manager
 
-Steam Grid Manager e' una app desktop per gestire le immagini della libreria Steam usando SteamGridDB.
+Steam Grid Manager is a desktop app for managing Steam library artwork using SteamGridDB.
 
-Permette di scansionare le librerie Steam locali, vedere giochi installati, giochi non installati della propria libreria Steam e giochi aggiunti come "Non-Steam", cercare artwork su SteamGridDB e applicare cover, hero, logo e icone direttamente nella cartella artwork del profilo Steam.
+It can scan local Steam libraries, show installed games, non-installed games from your Steam library, and games added as "Non-Steam", search for artwork on SteamGridDB, and apply covers, heroes, logos, and icons directly to the Steam profile artwork folder.
 
-## Funzioni
+## Features
 
-- Rileva automaticamente l'account Steam attivo da `loginusers.vdf`.
-- Legge tutte le librerie Steam configurate in `libraryfolders.vdf`.
-- Mostra giochi installati, giochi non installati e giochi Non-Steam.
-- Mostra le anteprime gia' presenti da `userdata/<steamUserId>/config/grid` e dalla cache ufficiale Steam.
-- Cerca artwork su SteamGridDB tramite API key.
-- Applica cover, hero, logo e icone con backup automatico prima della sovrascrittura.
-- Salva path Steam, SteamGridDB API key e Steam Web API key nelle impostazioni locali.
+- Automatically detects the active Steam account from `loginusers.vdf`.
+- Reads all Steam libraries configured in `libraryfolders.vdf`.
+- Shows installed games, non-installed games, and Non-Steam games.
+- Displays previews already present in `userdata/<steamUserId>/config/grid` and in the official Steam cache.
+- Searches for artwork on SteamGridDB using an API key.
+- Applies covers, heroes, logos, and icons with automatic backup before overwriting files.
+- Saves the Steam path, SteamGridDB API key, and Steam Web API key in local settings.
 
-## Avvio
+## Launch
 
-App desktop gia' compilata:
+Prebuilt desktop app:
 
 ```powershell
 & ".\src-tauri\target\release\steam-grid-manager.exe"
 ```
 
-Modalita sviluppo Tauri:
+Tauri development mode:
 
 ```powershell
 .\scripts\tauri-dev.ps1
 ```
 
-Rigenerare exe e installer:
+Rebuild the `.exe` and installer:
 
 ```powershell
 .\scripts\tauri-build.ps1
 ```
 
-Modalita web locale:
+Local web mode:
 
 ```powershell
 node src/server.mjs
 ```
 
-Poi apri:
+Then open:
 
 ```text
 http://localhost:5177
@@ -52,33 +52,33 @@ http://localhost:5177
 
 ## API Key
 
-Per cercare artwork serve una SteamGridDB API key.
+You need a SteamGridDB API key to search for artwork.
 
-Per vedere anche i giochi non installati serve una Steam Web API key:
+You need a Steam Web API key to also view non-installed games:
 
 ```text
 https://steamcommunity.com/dev/apikey
 ```
 
-Nel campo dominio puoi usare:
+For the domain field, you can use:
 
 ```text
 localhost
 ```
 
-## Path Steam
+## Steam Path
 
-Path predefinito:
+Default path:
 
 ```text
 C:\Program Files (x86)\Steam
 ```
 
-Puoi cambiarlo dalla barra superiore dell'app.
+You can change it from the top bar of the app.
 
-## Nota
+## Note
 
-Steam non espone una API ufficiale per modificare gli artwork locali. L'app lavora sui file usati dal client Steam, in particolare:
+Steam does not provide an official API to modify local artwork. The app works directly with the files used by the Steam client, specifically:
 
 ```text
 userdata/<steamUserId>/config/grid
