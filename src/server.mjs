@@ -154,11 +154,14 @@ async function scanSteam(steamPath, selectedUserId, steamApiKey = "", includeOwn
   let ownedLibraryStatus = "disabled";
   let ownedGames = [];
   if (includeOwnedLibrary) {
+    ownedGames = await scanLocalConfigGames(normalizedSteamPath, userId, games);
+    ownedLibraryStatus = `local:${ownedGames.length}`;
     try {
-      ownedGames = await fetchOwnedGames(steamApiKey, activeAccount?.steamId64, games);
+      const apiGames = await fetchOwnedGames(steamApiKey, activeAccount?.steamId64, games);
+      ownedGames = mergeGames(ownedGames, apiGames);
       ownedLibraryStatus = `ok:${ownedGames.length}`;
     } catch (error) {
-      ownedLibraryStatus = `error:${error.message}`;
+      ownedLibraryStatus = ownedGames.length ? `local:${ownedGames.length};api-error:${error.message}` : `error:${error.message}`;
     }
   }
   hydrateArtwork(normalizedSteamPath, userId, games);
@@ -219,7 +222,10 @@ async function scanAccounts(steamPath) {
         path: path.join(userdata, id),
         accountName: login.AccountName || "",
         personaName: login.PersonaName || "",
+        hasLogin: Boolean(login.SteamID64),
+        autoLogin: login.AutoLogin === "1",
         mostRecent: login.MostRecent === "1",
+        timestamp: Number(login.Timestamp || 0),
         hasGrid: fssync.existsSync(path.join(userdata, id, "config", "grid")),
         hasShortcuts: fssync.existsSync(path.join(userdata, id, "config", "shortcuts.vdf"))
       };
@@ -227,7 +233,13 @@ async function scanAccounts(steamPath) {
     .sort((a, b) => {
       if (a.id === "0") return 1;
       if (b.id === "0") return -1;
-      return Number(b.mostRecent) - Number(a.mostRecent) || Number(b.hasGrid) - Number(a.hasGrid) || Number(b.hasShortcuts) - Number(a.hasShortcuts) || a.id.localeCompare(b.id);
+      return Number(b.autoLogin) - Number(a.autoLogin)
+        || Number(b.mostRecent) - Number(a.mostRecent)
+        || Number(b.hasLogin) - Number(a.hasLogin)
+        || Number(b.timestamp) - Number(a.timestamp)
+        || Number(b.hasShortcuts) - Number(a.hasShortcuts)
+        || Number(b.hasGrid) - Number(a.hasGrid)
+        || a.id.localeCompare(b.id);
     });
 }
 
@@ -291,12 +303,83 @@ function steamId64ToAccountId(steamId64) {
 }
 
 function pickActiveAccount(accounts) {
-  return accounts.find((account) => account.id !== "0" && account.mostRecent)?.id
-    || accounts.find((account) => account.id !== "0" && account.hasGrid)?.id
+  return accounts.find((account) => account.id !== "0" && account.autoLogin)?.id
+    || accounts.find((account) => account.id !== "0" && account.mostRecent)?.id
+    || accounts.filter((account) => account.id !== "0" && account.hasLogin).sort((a, b) => Number(b.timestamp) - Number(a.timestamp))[0]?.id
     || accounts.find((account) => account.id !== "0" && account.hasShortcuts)?.id
+    || accounts.find((account) => account.id !== "0" && account.hasGrid)?.id
     || accounts.find((account) => account.id !== "0")?.id
     || accounts[0]?.id
     || "";
+}
+
+async function scanLocalConfigGames(steamPath, userId, installedGames) {
+  if (!userId) return [];
+  const text = await readTextOptional(path.join(steamPath, "userdata", String(userId), "config", "localconfig.vdf"));
+  if (!text) return [];
+  const parsed = parseKeyValueVdf(text);
+  const localApps = parsed.UserLocalConfigStore?.Software?.valve?.Steam?.apps || parsed.UserLocalConfigStore?.Software?.Valve?.Steam?.apps || {};
+  const installed = new Set(installedGames.map((game) => String(game.appId)));
+  const appIds = Object.keys(localApps).filter((appId) => /^\d+$/.test(appId) && appId !== "0" && !installed.has(appId));
+  if (!appIds.length) return [];
+
+  const appNames = await readAppInfoNames(steamPath, appIds);
+  return appIds.map((appId) => ({
+    id: `owned:${appId}`,
+    appId,
+    gridId: appId,
+    name: appNames.get(appId) || `Steam App ${appId}`,
+    installDir: "",
+    exe: "",
+    startDir: "",
+    launchOptions: "",
+    libraryPath: "Owned",
+    libraryLabel: "Non installato",
+    type: "owned",
+    artwork: emptyArtwork()
+  }));
+}
+
+async function readAppInfoNames(steamPath, appIds) {
+  const names = new Map();
+  const buffer = await readBufferOptional(path.join(steamPath, "appcache", "appinfo.vdf"));
+  if (!buffer) return names;
+  for (const appId of appIds) {
+    const marker = Buffer.alloc(4);
+    marker.writeUInt32LE(Number(appId) >>> 0);
+    let offset = buffer.indexOf(marker);
+    while (offset >= 0) {
+      const name = readAppInfoNameNear(buffer, offset);
+      if (name) {
+        names.set(appId, name);
+        break;
+      }
+      offset = buffer.indexOf(marker, offset + 4);
+    }
+  }
+  return names;
+}
+
+function readAppInfoNameNear(buffer, offset) {
+  const key = Buffer.from([0x01, 0x04, 0x00, 0x00, 0x00]);
+  const start = buffer.indexOf(key, offset);
+  if (start < 0 || start > offset + 2048) return "";
+  const valueStart = start + key.length;
+  const valueEnd = buffer.indexOf(0, valueStart);
+  if (valueEnd < 0 || valueEnd > valueStart + 240) return "";
+  const value = buffer.toString("utf8", valueStart, valueEnd).trim();
+  return value && !/[\u0000-\u001f]/.test(value) ? value : "";
+}
+
+function mergeGames(primary, secondary) {
+  const byAppId = new Map();
+  for (const game of primary) byAppId.set(String(game.appId), game);
+  for (const game of secondary) {
+    const appId = String(game.appId);
+    const existing = byAppId.get(appId);
+    byAppId.set(appId, existing ? { ...existing, ...game, artwork: existing.artwork } : game);
+  }
+  return [...byAppId.values()];
 }
 
 async function scanShortcuts(steamPath, userId) {
@@ -494,6 +577,7 @@ async function applyArtwork(body) {
   await backupAndRemoveExistingArtwork(gridDir, stem);
 
   await fs.writeFile(target, bytes);
+  await mirrorArtworkToSteamCache(path.resolve(steamPath), String(gridId), assetType || "grids", bytes, ext);
   return { ok: true, target };
 }
 
@@ -522,6 +606,77 @@ async function backupAndRemoveExistingArtwork(gridDir, stem) {
   for (const file of existing) {
     await fs.copyFile(file, path.join(backupDir, `${stamp}_${path.basename(file)}`));
     await fs.rm(file);
+  }
+}
+
+async function mirrorArtworkToSteamCache(steamPath, appId, assetType, bytes, ext) {
+  if (!/^\d+$/.test(appId)) return;
+  const cacheDir = path.join(steamPath, "appcache", "librarycache", appId);
+  if (!fssync.existsSync(cacheDir)) return;
+
+  if (assetType === "logos") {
+    const targets = findCacheFiles(cacheDir, (file) => {
+      const name = path.basename(file).toLowerCase();
+      return name === "logo.png" || name === "logo_2x.png" || name === "logo.jpg" || name === "logo.webp";
+    });
+    await backupAndOverwriteCacheFiles(cacheDir, targets.length ? targets : [path.join(cacheDir, `logo${ext}`)], bytes);
+  }
+
+  if (assetType === "icons") {
+    const icon = findCacheIconFile(cacheDir);
+    if (icon) {
+      await backupAndOverwriteCacheFiles(cacheDir, [icon], bytes);
+      const sibling = path.join(path.dirname(icon), `${path.basename(icon, path.extname(icon))}${ext}`);
+      if (sibling !== icon) await fs.writeFile(sibling, bytes);
+    }
+  }
+}
+
+function findCacheFiles(dir, predicate) {
+  let entries;
+  try {
+    entries = fssync.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...findCacheFiles(fullPath, predicate));
+    } else if (predicate(fullPath)) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function findCacheIconFile(cacheDir) {
+  const exact = findCacheFiles(cacheDir, (file) => {
+    const stem = path.basename(file, path.extname(file)).toLowerCase();
+    return stem === "icon" || stem.endsWith("_icon");
+  })[0];
+  if (exact) return exact;
+
+  return findCacheFiles(cacheDir, (file) => {
+    const ext = path.extname(file).toLowerCase();
+    const stem = path.basename(file, ext).toLowerCase();
+    return artworkExtensions.includes(ext) && !stem.startsWith("library_") && stem !== "logo" && stem !== "logo_2x" && path.dirname(file) === cacheDir;
+  })[0] || "";
+}
+
+async function backupAndOverwriteCacheFiles(cacheDir, targets, bytes) {
+  if (!targets.length) return;
+  const backupDir = path.join(cacheDir, "_sgm_backup");
+  await fs.mkdir(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  for (const target of targets) {
+    if (fssync.existsSync(target)) {
+      const relative = path.relative(cacheDir, target).replace(/[\\/]/g, "__");
+      await fs.copyFile(target, path.join(backupDir, `${stamp}_${relative}`));
+    }
+    await fs.writeFile(target, bytes);
   }
 }
 

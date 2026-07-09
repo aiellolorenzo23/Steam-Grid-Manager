@@ -1,8 +1,9 @@
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_STEAM_PATH: &str = "C:\\Program Files (x86)\\Steam";
@@ -28,8 +29,13 @@ struct Account {
     account_name: String,
     #[serde(rename = "personaName")]
     persona_name: String,
+    #[serde(rename = "hasLogin")]
+    has_login: bool,
+    #[serde(rename = "autoLogin")]
+    auto_login: bool,
     #[serde(rename = "mostRecent")]
     most_recent: bool,
+    timestamp: u64,
     #[serde(rename = "hasGrid")]
     has_grid: bool,
     #[serde(rename = "hasShortcuts")]
@@ -273,18 +279,24 @@ async fn scan_steam(options: ScanOptions) -> Result<ScanResult, String> {
     };
     let mut owned_library_status = "disabled".to_string();
     let mut owned_games = if options.include_owned_library {
+        let mut local_games = scan_local_config_games(&steam_path, &selected_user_id, &steam_games);
         let steam_id64 = accounts
             .iter()
             .find(|account| account.id == selected_user_id)
             .and_then(|account| account.steam_id64.parse::<u64>().ok());
         match fetch_owned_games(options.steam_api_key, steam_id64, &steam_games).await {
             Ok(games) => {
-                owned_library_status = format!("ok:{}", games.len());
-                games
+                local_games = merge_games(local_games, games);
+                owned_library_status = format!("ok:{}", local_games.len());
+                local_games
             }
             Err(error) => {
-                owned_library_status = format!("error:{}", error);
-                Vec::new()
+                owned_library_status = if local_games.is_empty() {
+                    format!("error:{}", error)
+                } else {
+                    format!("local:{};api-error:{}", local_games.len(), error)
+                };
+                local_games
             }
         }
     } else {
@@ -411,7 +423,14 @@ async fn apply_artwork(request: ApplyArtworkRequest) -> Result<Value, String> {
 
     backup_and_remove_existing_artwork(&grid_dir, &stem)?;
 
-    fs::write(&target, bytes).map_err(|err| err.to_string())?;
+    fs::write(&target, &bytes).map_err(|err| err.to_string())?;
+    mirror_artwork_to_steam_cache(
+        Path::new(&request.steam_path),
+        &request.grid_id,
+        &request.asset_type,
+        &bytes,
+        ext,
+    )?;
     Ok(json!({ "ok": true, "target": target.to_string_lossy() }))
 }
 
@@ -554,10 +573,23 @@ fn scan_accounts(steam_path: &Path) -> Vec<Account> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+                has_login: login
+                    .and_then(|value| value.get("SteamID64"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty()),
+                auto_login: login
+                    .and_then(|value| value.get("AutoLogin"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == "1"),
                 most_recent: login
                     .and_then(|value| value.get("MostRecent"))
                     .and_then(Value::as_str)
                     .is_some_and(|value| value == "1"),
+                timestamp: login
+                    .and_then(|value| value.get("Timestamp"))
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0),
                 has_grid: config.join("grid").exists(),
                 has_shortcuts: config.join("shortcuts.vdf").exists(),
             })
@@ -571,10 +603,13 @@ fn scan_accounts(steam_path: &Path) -> Vec<Account> {
         if b.id == "0" {
             return std::cmp::Ordering::Less;
         }
-        b.most_recent
-            .cmp(&a.most_recent)
-            .then_with(|| b.has_grid.cmp(&a.has_grid))
+        b.auto_login
+            .cmp(&a.auto_login)
+            .then_with(|| b.most_recent.cmp(&a.most_recent))
+            .then_with(|| b.has_login.cmp(&a.has_login))
+            .then_with(|| b.timestamp.cmp(&a.timestamp))
             .then_with(|| b.has_shortcuts.cmp(&a.has_shortcuts))
+            .then_with(|| b.has_grid.cmp(&a.has_grid))
             .then_with(|| a.id.cmp(&b.id))
     });
     accounts
@@ -676,13 +711,151 @@ fn steam_id64_to_account_id(steam_id64: &str) -> Option<String> {
 fn pick_active_account(accounts: &[Account]) -> String {
     accounts
         .iter()
-        .find(|account| account.id != "0" && account.most_recent)
-        .or_else(|| accounts.iter().find(|account| account.id != "0" && account.has_grid))
+        .find(|account| account.id != "0" && account.auto_login)
+        .or_else(|| accounts.iter().find(|account| account.id != "0" && account.most_recent))
+        .or_else(|| {
+            accounts
+                .iter()
+                .filter(|account| account.id != "0" && account.has_login)
+                .max_by_key(|account| account.timestamp)
+        })
         .or_else(|| accounts.iter().find(|account| account.id != "0" && account.has_shortcuts))
+        .or_else(|| accounts.iter().find(|account| account.id != "0" && account.has_grid))
         .or_else(|| accounts.iter().find(|account| account.id != "0"))
         .or_else(|| accounts.first())
         .map(|account| account.id.clone())
         .unwrap_or_default()
+}
+
+fn scan_local_config_games(steam_path: &Path, user_id: &str, installed_games: &[Game]) -> Vec<Game> {
+    if user_id.is_empty() {
+        return Vec::new();
+    }
+    let localconfig_path = steam_path
+        .join("userdata")
+        .join(user_id)
+        .join("config")
+        .join("localconfig.vdf");
+    let Ok(text) = fs::read_to_string(localconfig_path) else {
+        return Vec::new();
+    };
+    let parsed = parse_key_value_vdf(&text);
+    let Some(local_apps) = parsed
+        .get("UserLocalConfigStore")
+        .and_then(|value| value.get("Software"))
+        .and_then(|value| value.get("valve").or_else(|| value.get("Valve")))
+        .and_then(|value| value.get("Steam"))
+        .and_then(|value| value.get("apps"))
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+
+    let installed = installed_games
+        .iter()
+        .map(|game| game.app_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let app_ids = local_apps
+        .keys()
+        .filter(|app_id| {
+            app_id.as_str() != "0"
+                && app_id.chars().all(|char| char.is_ascii_digit())
+                && !installed.contains(app_id.as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if app_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let app_names = read_app_info_names(steam_path, &app_ids);
+    app_ids
+        .into_iter()
+        .map(|app_id| Game {
+            id: format!("owned:{}", app_id),
+            app_id: app_id.clone(),
+            grid_id: app_id.clone(),
+            name: app_names
+                .get(&app_id)
+                .cloned()
+                .unwrap_or_else(|| format!("Steam App {}", app_id)),
+            install_dir: String::new(),
+            exe: String::new(),
+            start_dir: String::new(),
+            launch_options: String::new(),
+            library_path: "Owned".to_string(),
+            library_label: "Non installato".to_string(),
+            game_type: "owned".to_string(),
+            artwork: Artwork::default(),
+        })
+        .collect()
+}
+
+fn read_app_info_names(steam_path: &Path, app_ids: &[String]) -> BTreeMap<String, String> {
+    let Ok(bytes) = fs::read(steam_path.join("appcache").join("appinfo.vdf")) else {
+        return BTreeMap::new();
+    };
+    let mut names = BTreeMap::new();
+    for app_id in app_ids {
+        let Ok(id) = app_id.parse::<u32>() else {
+            continue;
+        };
+        let marker = id.to_le_bytes();
+        let mut offset = 0usize;
+        while let Some(found) = find_bytes(&bytes[offset..], &marker) {
+            let absolute = offset + found;
+            if let Some(name) = read_app_info_name_near(&bytes, absolute) {
+                names.insert(app_id.clone(), name);
+                break;
+            }
+            offset = absolute + marker.len();
+        }
+    }
+    names
+}
+
+fn read_app_info_name_near(bytes: &[u8], offset: usize) -> Option<String> {
+    let key = [0x01, 0x04, 0x00, 0x00, 0x00];
+    let search_end = (offset + 2048).min(bytes.len());
+    let relative = find_bytes(&bytes[offset..search_end], &key)?;
+    let value_start = offset + relative + key.len();
+    let value_end = bytes[value_start..]
+        .iter()
+        .position(|byte| *byte == 0)
+        .map(|position| value_start + position)?;
+    if value_end > value_start + 240 {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&bytes[value_start..value_end])
+        .trim()
+        .to_string();
+    if value.is_empty() || value.chars().any(|char| char.is_control()) {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn merge_games(primary: Vec<Game>, secondary: Vec<Game>) -> Vec<Game> {
+    let mut games = BTreeMap::new();
+    for game in primary {
+        games.insert(game.app_id.clone(), game);
+    }
+    for game in secondary {
+        games
+            .entry(game.app_id.clone())
+            .and_modify(|existing| {
+                existing.name = game.name.clone();
+            })
+            .or_insert(game);
+    }
+    games.into_values().collect()
 }
 
 fn scan_shortcuts(steam_path: &Path, user_id: &str) -> Vec<Game> {
@@ -1050,6 +1223,156 @@ fn backup_and_remove_existing_artwork(grid_dir: &Path, stem: &str) -> Result<(),
         fs::remove_file(&path).map_err(|err| err.to_string())?;
     }
     Ok(())
+}
+
+fn mirror_artwork_to_steam_cache(
+    steam_path: &Path,
+    app_id: &str,
+    asset_type: &str,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<(), String> {
+    if app_id.is_empty() || !app_id.chars().all(|char| char.is_ascii_digit()) {
+        return Ok(());
+    }
+    let cache_dir = steam_path
+        .join("appcache")
+        .join("librarycache")
+        .join(app_id);
+    if !cache_dir.exists() {
+        return Ok(());
+    }
+
+    match asset_type {
+        "logos" => {
+            let mut targets = find_cache_files(&cache_dir, &|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| {
+                        matches!(
+                            name.to_ascii_lowercase().as_str(),
+                            "logo.png" | "logo_2x.png" | "logo.jpg" | "logo.webp"
+                        )
+                    })
+                    .unwrap_or(false)
+            });
+            if targets.is_empty() {
+                targets.push(cache_dir.join(format!("logo{}", ext)));
+            }
+            backup_and_overwrite_cache_files(&cache_dir, &targets, bytes)?;
+        }
+        "icons" => {
+            if let Some(icon) = find_cache_icon_file(&cache_dir) {
+                backup_and_overwrite_cache_files(&cache_dir, &[icon.clone()], bytes)?;
+                let sibling = icon.with_extension(ext.trim_start_matches('.'));
+                if sibling != icon {
+                    fs::write(sibling, bytes).map_err(|err| err.to_string())?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn find_cache_files(dir: &Path, predicate: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(find_cache_files(&path, predicate));
+        } else if predicate(&path) {
+            files.push(path);
+        }
+    }
+    files
+}
+
+fn find_cache_icon_file(cache_dir: &Path) -> Option<PathBuf> {
+    let exact = find_cache_files(cache_dir, &|path| {
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        stem == "icon" || stem.ends_with("_icon")
+    })
+    .into_iter()
+    .next();
+    if exact.is_some() {
+        return exact;
+    }
+
+    find_cache_files(cache_dir, &|path| {
+        if path.parent() != Some(cache_dir) {
+            return false;
+        }
+        let ext = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        artwork_extensions().contains(&ext.as_str())
+            && !stem.starts_with("library_")
+            && stem != "logo"
+            && stem != "logo_2x"
+    })
+    .into_iter()
+    .next()
+}
+
+fn backup_and_overwrite_cache_files(cache_dir: &Path, targets: &[PathBuf], bytes: &[u8]) -> Result<(), String> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let backup_dir = cache_dir.join("_sgm_backup");
+    fs::create_dir_all(&backup_dir).map_err(|err| err.to_string())?;
+    let stamp = chrono_like_stamp();
+    for target in targets {
+        if target.exists() {
+            let relative = target
+                .strip_prefix(cache_dir)
+                .unwrap_or(target)
+                .to_string_lossy()
+                .replace(['\\', '/'], "__");
+            fs::copy(target, backup_dir.join(format!("{}_{}", stamp, relative)))
+                .map_err(|err| err.to_string())?;
+        }
+        let target_bytes = cache_bytes_for_target(bytes, target);
+        fs::write(target, target_bytes).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn cache_bytes_for_target(bytes: &[u8], target: &Path) -> Vec<u8> {
+    let ext = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let format = match ext.as_str() {
+        "jpg" | "jpeg" => image::ImageFormat::Jpeg,
+        "png" => image::ImageFormat::Png,
+        _ => return bytes.to_vec(),
+    };
+
+    let Ok(image) = image::load_from_memory(bytes) else {
+        return bytes.to_vec();
+    };
+    let mut output = Cursor::new(Vec::new());
+    if image.write_to(&mut output, format).is_ok() {
+        output.into_inner()
+    } else {
+        bytes.to_vec()
+    }
 }
 
 fn artwork_extensions() -> &'static [&'static str] {

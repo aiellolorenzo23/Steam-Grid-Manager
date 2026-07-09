@@ -202,9 +202,16 @@ async function scan() {
     if (state.selectedGame) renderModal();
     setHero("Libreria scansionata", `${state.games.length} giochi trovati in ${state.libraries.length} librerie.`);
     if (wantsOwnedLibrary && !steamApiKey) {
-      setSync("Steam API key mancante", "Aggiungila nelle impostazioni e salva");
+      const localCount = parseLocalOwnedCount(data.ownedLibraryStatus);
+      if (localCount) {
+        setSync("Cache locale Steam", `${localCount} giochi non installati trovati. API key assente`);
+      } else {
+        setSync("Steam API key mancante", "Aggiungila nelle impostazioni e salva");
+      }
     } else if (wantsOwnedLibrary && data.ownedLibraryStatus?.startsWith("error:")) {
       setSync("Steam Web API errore", data.ownedLibraryStatus.slice(6));
+    } else if (wantsOwnedLibrary && data.ownedLibraryStatus?.startsWith("local:")) {
+      setSync("Cache locale Steam", `${data.counts?.owned ?? 0} giochi non installati trovati`);
     } else if (wantsOwnedLibrary) {
       setSync("Steam Web API ok", `${data.counts?.owned ?? 0} giochi non installati trovati`);
     } else {
@@ -540,6 +547,11 @@ function setSync(title, subtitle) {
 
 function setSettingsStatus(text) {
   els.settingsStatus.textContent = text;
+}
+
+function parseLocalOwnedCount(status) {
+  const match = String(status || "").match(/^local:(\d+)/);
+  return match ? Number(match[1]) : 0;
 }
 
 function localArtworkUrl(filePath) {
