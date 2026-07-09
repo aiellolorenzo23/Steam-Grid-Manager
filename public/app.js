@@ -69,10 +69,12 @@ const els = {
   selectedType: document.querySelector("#selectedType"),
   selectedName: document.querySelector("#selectedName"),
   selectedMeta: document.querySelector("#selectedMeta"),
+  filterStatic: document.querySelector("#filterStatic"),
   filterAnimated: document.querySelector("#filterAnimated"),
   filterNsfw: document.querySelector("#filterNsfw"),
   filterHumor: document.querySelector("#filterHumor"),
   filterEpilepsy: document.querySelector("#filterEpilepsy"),
+  filterUntagged: document.querySelector("#filterUntagged"),
   dimensionFilter: document.querySelector("#dimensionFilter"),
   searchArtwork: document.querySelector("#searchArtwork"),
   artworkStatus: document.querySelector("#artworkStatus"),
@@ -348,6 +350,7 @@ async function searchArtwork() {
     });
     if (game.type === "steam" || game.type === "owned") params.set("steamAppId", game.appId);
     if (filters.tags.length) params.set("tags", filters.tags.join(","));
+    if (filters.types.length) params.set("types", filters.types.join(","));
     if (filters.mimes.length) params.set("mimes", filters.mimes.join(","));
     if (filters.dimensions.length) params.set("dimensions", filters.dimensions.join(","));
     const data = await callBackend(
@@ -359,6 +362,7 @@ async function searchArtwork() {
           steamAppId: game.type === "steam" || game.type === "owned" ? game.appId : "",
           assetType: state.assetType,
           tags: filters.tags,
+          types: filters.types,
           mimes: filters.mimes,
           dimensions: filters.dimensions
         }
@@ -374,14 +378,18 @@ async function searchArtwork() {
 
 function buildSgdbFilters() {
   const tags = [];
+  const types = [];
   const mimes = [];
   const dimensions = [];
   if (els.filterNsfw.checked) tags.push("nsfw");
   if (els.filterHumor.checked) tags.push("humor");
   if (els.filterEpilepsy.checked) tags.push("epilepsy");
-  if (els.filterAnimated.checked) mimes.push("image/webp");
+  if (els.filterUntagged.checked) tags.push("untagged");
+  if (els.filterStatic.checked) types.push("static");
+  if (els.filterAnimated.checked) types.push("animated");
+  if (els.filterAnimated.checked && state.assetType !== "icons") mimes.push("image/webp");
   if (els.dimensionFilter.value) dimensions.push(els.dimensionFilter.value);
-  return { tags, mimes, dimensions };
+  return { tags, types, mimes, dimensions };
 }
 
 function renderArtwork(assets) {

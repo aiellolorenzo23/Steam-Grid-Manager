@@ -120,6 +120,7 @@ struct SgdbSearchOptions {
     #[serde(rename = "assetType")]
     asset_type: String,
     tags: Vec<String>,
+    types: Vec<String>,
     mimes: Vec<String>,
     dimensions: Vec<String>,
 }
@@ -347,7 +348,7 @@ async fn search_steam_grid_db(options: SgdbSearchOptions) -> Result<Value, Strin
             "https://www.steamgriddb.com/api/v2/{}/steam/{}",
             safe_asset_type, options.steam_app_id
         );
-        if let Ok(value) = sgdb_get(&client, &route, &options.tags, &options.mimes, &options.dimensions).await {
+        if let Ok(value) = sgdb_get(&client, &route, &options.tags, &options.types, &options.mimes, &options.dimensions).await {
             assets = value
                 .get("data")
                 .and_then(Value::as_array)
@@ -361,7 +362,7 @@ async fn search_steam_grid_db(options: SgdbSearchOptions) -> Result<Value, Strin
             "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
             options.query.replace(' ', "%20")
         );
-        let search = sgdb_get(&client, &route, &[], &[], &[]).await?;
+        let search = sgdb_get(&client, &route, &[], &[], &[], &[]).await?;
         game = search
             .get("data")
             .and_then(Value::as_array)
@@ -374,7 +375,7 @@ async fn search_steam_grid_db(options: SgdbSearchOptions) -> Result<Value, Strin
                 "https://www.steamgriddb.com/api/v2/{}/game/{}",
                 safe_asset_type, game_id
             );
-            let by_game = sgdb_get(&client, &route, &options.tags, &options.mimes, &options.dimensions).await?;
+            let by_game = sgdb_get(&client, &route, &options.tags, &options.types, &options.mimes, &options.dimensions).await?;
             assets = by_game
                 .get("data")
                 .and_then(Value::as_array)
@@ -406,21 +407,9 @@ async fn apply_artwork(request: ApplyArtworkRequest) -> Result<Value, String> {
     let ext = image_ext_from_url(&request.image_url);
     let filename = artwork_filename(&request.grid_id, &request.asset_type, ext);
     let target = grid_dir.join(filename);
+    let stem = artwork_stem(&request.grid_id, &request.asset_type);
 
-    if target.exists() {
-        let backup_dir = grid_dir.join("_sgm_backup");
-        fs::create_dir_all(&backup_dir).map_err(|err| err.to_string())?;
-        let stamp = chrono_like_stamp();
-        let backup_name = format!(
-            "{}_{}",
-            stamp,
-            target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("artwork")
-        );
-        fs::copy(&target, backup_dir.join(backup_name)).map_err(|err| err.to_string())?;
-    }
+    backup_and_remove_existing_artwork(&grid_dir, &stem)?;
 
     fs::write(&target, bytes).map_err(|err| err.to_string())?;
     Ok(json!({ "ok": true, "target": target.to_string_lossy() }))
@@ -450,6 +439,7 @@ async fn sgdb_get(
     client: &reqwest::Client,
     url: &str,
     tags: &[String],
+    types: &[String],
     mimes: &[String],
     dimensions: &[String],
 ) -> Result<Value, String> {
@@ -457,6 +447,9 @@ async fn sgdb_get(
     let mut query = Vec::new();
     if !tags.is_empty() {
         query.push(("oneoftag", tags.join(",")));
+    }
+    if !types.is_empty() {
+        query.push(("types", types.join(",")));
     }
     if !mimes.is_empty() {
         query.push(("mimes", mimes.join(",")));
@@ -761,13 +754,16 @@ fn hydrate_artwork(steam_path: &Path, user_id: &str, games: &mut [Game]) {
                 find_artwork(&grid_dir, &format!("{}_logo", game.grid_id)),
                 find_steam_cache_artwork(steam_path, &game.app_id, "logo"),
             ]),
-            icon: first_existing(vec![find_artwork(&grid_dir, &format!("{}_icon", game.grid_id))]),
+            icon: first_existing(vec![
+                find_artwork(&grid_dir, &format!("{}_icon", game.grid_id)),
+                find_steam_cache_icon(steam_path, &game.app_id),
+            ]),
         };
     }
 }
 
 fn find_artwork(grid_dir: &Path, stem: &str) -> String {
-    for ext in ["png", "jpg", "jpeg", "webp"] {
+    for ext in artwork_extensions() {
         let path = grid_dir.join(format!("{}.{}", stem, ext));
         if path.exists() {
             return path.to_string_lossy().to_string();
@@ -783,6 +779,15 @@ fn find_steam_cache_artwork(steam_path: &Path, app_id: &str, stem: &str) -> Stri
 
     let cache_dir = steam_path.join("appcache").join("librarycache").join(app_id);
     find_artwork_recursive(&cache_dir, stem).unwrap_or_default()
+}
+
+fn find_steam_cache_icon(steam_path: &Path, app_id: &str) -> String {
+    if app_id.is_empty() || !app_id.chars().all(|char| char.is_ascii_digit()) {
+        return String::new();
+    }
+
+    find_cache_icon_recursive(&steam_path.join("appcache").join("librarycache").join(app_id))
+        .unwrap_or_default()
 }
 
 fn find_artwork_recursive(dir: &Path, stem: &str) -> Option<String> {
@@ -803,7 +808,7 @@ fn find_artwork_recursive(dir: &Path, stem: &str) -> Option<String> {
         let matches_ext = path
             .extension()
             .and_then(|value| value.to_str())
-            .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp"));
+            .is_some_and(|value| artwork_extensions().contains(&value.to_ascii_lowercase().as_str()));
 
         if matches_stem && matches_ext {
             return Some(path.to_string_lossy().to_string());
@@ -813,6 +818,41 @@ fn find_artwork_recursive(dir: &Path, stem: &str) -> Option<String> {
     child_dirs
         .iter()
         .find_map(|child| find_artwork_recursive(child, stem))
+}
+
+fn find_cache_icon_recursive(dir: &Path) -> Option<String> {
+    let entries = fs::read_dir(dir).ok()?;
+    let mut child_dirs = Vec::new();
+    let mut fallback = None;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            child_dirs.push(path);
+            continue;
+        }
+
+        let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !artwork_extensions().contains(&ext.to_ascii_lowercase().as_str()) {
+            continue;
+        }
+
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if stem == "icon" || stem.ends_with("_icon") {
+            return Some(path.to_string_lossy().to_string());
+        }
+        if !stem.starts_with("library_") && stem != "logo" && fallback.is_none() {
+            fallback = Some(path.to_string_lossy().to_string());
+        }
+    }
+
+    fallback.or_else(|| child_dirs.iter().find_map(|child| find_cache_icon_recursive(child)))
 }
 
 fn first_existing(paths: Vec<String>) -> String {
@@ -952,13 +992,17 @@ fn crc32(input: &[u8]) -> u32 {
 }
 
 fn artwork_filename(grid_id: &str, asset_type: &str, ext: &str) -> String {
+    format!("{}{}", artwork_stem(grid_id, asset_type), ext)
+}
+
+fn artwork_stem(grid_id: &str, asset_type: &str) -> String {
     match asset_type {
-        "gridVertical" => format!("{}p{}", grid_id, ext),
-        "gridHorizontal" => format!("{}{}", grid_id, ext),
-        "heroes" => format!("{}_hero{}", grid_id, ext),
-        "logos" => format!("{}_logo{}", grid_id, ext),
-        "icons" => format!("{}_icon{}", grid_id, ext),
-        _ => format!("{}p{}", grid_id, ext),
+        "gridVertical" => format!("{}p", grid_id),
+        "gridHorizontal" => grid_id.to_string(),
+        "heroes" => format!("{}_hero", grid_id),
+        "logos" => format!("{}_logo", grid_id),
+        "icons" => format!("{}_icon", grid_id),
+        _ => format!("{}p", grid_id),
     }
 }
 
@@ -968,9 +1012,44 @@ fn image_ext_from_url(url: &str) -> &str {
         ".jpg"
     } else if lower.contains(".webp") {
         ".webp"
+    } else if lower.contains(".ico") {
+        ".ico"
     } else {
         ".png"
     }
+}
+
+fn backup_and_remove_existing_artwork(grid_dir: &Path, stem: &str) -> Result<(), String> {
+    let mut existing = Vec::new();
+    for ext in artwork_extensions() {
+        let path = grid_dir.join(format!("{}.{}", stem, ext));
+        if path.exists() {
+            existing.push(path);
+        }
+    }
+    if existing.is_empty() {
+        return Ok(());
+    }
+
+    let backup_dir = grid_dir.join("_sgm_backup");
+    fs::create_dir_all(&backup_dir).map_err(|err| err.to_string())?;
+    let stamp = chrono_like_stamp();
+    for path in existing {
+        let backup_name = format!(
+            "{}_{}",
+            stamp,
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("artwork")
+        );
+        fs::copy(&path, backup_dir.join(backup_name)).map_err(|err| err.to_string())?;
+        fs::remove_file(&path).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn artwork_extensions() -> &'static [&'static str] {
+    &["png", "jpg", "jpeg", "webp", "ico"]
 }
 
 fn chrono_like_stamp() -> String {

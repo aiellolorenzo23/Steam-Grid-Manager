@@ -19,8 +19,10 @@ const mimeTypes = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".ico": "image/x-icon",
   ".svg": "image/svg+xml"
 };
+const artworkExtensions = [".png", ".jpg", ".jpeg", ".webp", ".ico"];
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -60,9 +62,10 @@ async function handleApi(url, req, res) {
     const steamAppId = url.searchParams.get("steamAppId") || "";
     const assetType = url.searchParams.get("assetType") || "gridVertical";
     const tags = csvParam(url.searchParams.get("tags") || "");
+    const types = csvParam(url.searchParams.get("types") || "");
     const mimes = csvParam(url.searchParams.get("mimes") || "");
     const dimensions = csvParam(url.searchParams.get("dimensions") || "");
-    sendJson(res, 200, await searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags, mimes, dimensions }));
+    sendJson(res, 200, await searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags, types, mimes, dimensions }));
     return;
   }
 
@@ -338,13 +341,16 @@ function hydrateArtwork(steamPath, userId, games) {
         findArtwork(gridDir, `${game.gridId}_logo`),
         findSteamCacheArtwork(steamPath, game.appId, "logo")
       ]),
-      icon: findArtwork(gridDir, `${game.gridId}_icon`)
+      icon: firstExisting([
+        findArtwork(gridDir, `${game.gridId}_icon`),
+        findSteamCacheIcon(steamPath, game.appId)
+      ])
     };
   }
 }
 
 function findArtwork(gridDir, stem) {
-  for (const ext of [".png", ".jpg", ".jpeg", ".webp"]) {
+  for (const ext of artworkExtensions) {
     const file = path.join(gridDir, `${stem}${ext}`);
     if (fssync.existsSync(file)) return file;
   }
@@ -354,6 +360,11 @@ function findArtwork(gridDir, stem) {
 function findSteamCacheArtwork(steamPath, appId, stem) {
   if (!appId || !/^\d+$/.test(String(appId))) return "";
   return findArtworkRecursive(path.join(steamPath, "appcache", "librarycache", String(appId)), stem);
+}
+
+function findSteamCacheIcon(steamPath, appId) {
+  if (!appId || !/^\d+$/.test(String(appId))) return "";
+  return findCacheIconRecursive(path.join(steamPath, "appcache", "librarycache", String(appId)));
 }
 
 function findArtworkRecursive(dir, stem) {
@@ -373,13 +384,44 @@ function findArtworkRecursive(dir, stem) {
     }
     const ext = path.extname(entry.name).toLowerCase();
     const fileStem = path.basename(entry.name, ext);
-    if (fileStem.toLowerCase() === stem.toLowerCase() && [".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
+    if (fileStem.toLowerCase() === stem.toLowerCase() && artworkExtensions.includes(ext)) {
       return fullPath;
     }
   }
 
   for (const childDir of childDirs) {
     const found = findArtworkRecursive(childDir, stem);
+    if (found) return found;
+  }
+  return "";
+}
+
+function findCacheIconRecursive(dir) {
+  let entries;
+  try {
+    entries = fssync.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+
+  const childDirs = [];
+  let fallback = "";
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      childDirs.push(fullPath);
+      continue;
+    }
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!artworkExtensions.includes(ext)) continue;
+    const stem = path.basename(entry.name, ext).toLowerCase();
+    if (stem === "icon" || stem.endsWith("_icon")) return fullPath;
+    if (!stem.startsWith("library_") && stem !== "logo" && !fallback) fallback = fullPath;
+  }
+
+  if (fallback) return fallback;
+  for (const childDir of childDirs) {
+    const found = findCacheIconRecursive(childDir);
     if (found) return found;
   }
   return "";
@@ -393,7 +435,7 @@ function emptyArtwork() {
   return { gridVertical: "", gridHorizontal: "", hero: "", logo: "", icon: "" };
 }
 
-async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = [], mimes = [], dimensions = [] }) {
+async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = [], types = [], mimes = [], dimensions = [] }) {
   if (!apiKey) throw new Error("SteamGridDB API key mancante.");
   const safeAssetType = ["gridVertical", "gridHorizontal", "grids"].includes(assetType) ? "grids" : (["heroes", "logos", "icons"].includes(assetType) ? assetType : "grids");
   const headers = { Authorization: `Bearer ${apiKey}` };
@@ -401,7 +443,7 @@ async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = 
   let assets = [];
 
   if (steamAppId) {
-    const direct = await sgdbFetch(`/api/v2/${safeAssetType}/steam/${encodeURIComponent(steamAppId)}`, headers, { tags, mimes, dimensions });
+    const direct = await sgdbFetch(`/api/v2/${safeAssetType}/steam/${encodeURIComponent(steamAppId)}`, headers, { tags, types, mimes, dimensions });
     if (direct.success) assets = direct.data || [];
   }
 
@@ -409,7 +451,7 @@ async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = 
     const search = await sgdbFetch(`/api/v2/search/autocomplete/${encodeURIComponent(query)}`, headers);
     game = search.data?.[0] || null;
     if (game?.id) {
-      const byGame = await sgdbFetch(`/api/v2/${safeAssetType}/game/${game.id}`, headers, { tags, mimes, dimensions });
+      const byGame = await sgdbFetch(`/api/v2/${safeAssetType}/game/${game.id}`, headers, { tags, types, mimes, dimensions });
       if (byGame.success) assets = byGame.data || [];
     }
   }
@@ -420,6 +462,7 @@ async function searchSteamGridDb({ apiKey, query, steamAppId, assetType, tags = 
 async function sgdbFetch(route, headers, filters = {}) {
   const params = new URLSearchParams();
   if (filters.tags?.length) params.set("oneoftag", filters.tags.join(","));
+  if (filters.types?.length) params.set("types", filters.types.join(","));
   if (filters.mimes?.length) params.set("mimes", filters.mimes.join(","));
   if (filters.dimensions?.length) params.set("dimensions", filters.dimensions.join(","));
   const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -441,28 +484,43 @@ async function applyArtwork(body) {
   if (!response.ok) throw new Error(`Download immagine fallito: HTTP ${response.status}`);
   const bytes = Buffer.from(await response.arrayBuffer());
   const extFromUrl = path.extname(new URL(imageUrl).pathname).toLowerCase();
-  const ext = [".png", ".jpg", ".jpeg", ".webp"].includes(extFromUrl) ? extFromUrl : ".png";
+  const ext = artworkExtensions.includes(extFromUrl) ? extFromUrl : ".png";
   const filename = artworkFilename(String(gridId), assetType || "grids", ext);
   const target = path.join(gridDir, filename);
+  const stem = artworkStem(String(gridId), assetType || "grids");
 
-  if (fssync.existsSync(target)) {
-    const backupDir = path.join(gridDir, "_sgm_backup");
-    await fs.mkdir(backupDir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    await fs.copyFile(target, path.join(backupDir, `${stamp}_${filename}`));
-  }
+  await backupAndRemoveExistingArtwork(gridDir, stem);
 
   await fs.writeFile(target, bytes);
   return { ok: true, target };
 }
 
 function artworkFilename(gridId, assetType, ext) {
-  if (assetType === "gridHorizontal") return `${gridId}${ext}`;
-  if (assetType === "gridVertical") return `${gridId}p${ext}`;
-  if (assetType === "heroes") return `${gridId}_hero${ext}`;
-  if (assetType === "logos") return `${gridId}_logo${ext}`;
-  if (assetType === "icons") return `${gridId}_icon${ext}`;
-  return `${gridId}p${ext}`;
+  return `${artworkStem(gridId, assetType)}${ext}`;
+}
+
+function artworkStem(gridId, assetType) {
+  if (assetType === "gridHorizontal") return gridId;
+  if (assetType === "gridVertical") return `${gridId}p`;
+  if (assetType === "heroes") return `${gridId}_hero`;
+  if (assetType === "logos") return `${gridId}_logo`;
+  if (assetType === "icons") return `${gridId}_icon`;
+  return `${gridId}p`;
+}
+
+async function backupAndRemoveExistingArtwork(gridDir, stem) {
+  const existing = artworkExtensions
+    .map((ext) => path.join(gridDir, `${stem}${ext}`))
+    .filter((file) => fssync.existsSync(file));
+  if (!existing.length) return;
+
+  const backupDir = path.join(gridDir, "_sgm_backup");
+  await fs.mkdir(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  for (const file of existing) {
+    await fs.copyFile(file, path.join(backupDir, `${stamp}_${path.basename(file)}`));
+    await fs.rm(file);
+  }
 }
 
 function csvParam(value) {

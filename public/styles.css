@@ -686,7 +686,7 @@ select {
 
 .filter-row {
   display: grid;
-  grid-template-columns: repeat(4, max-content) minmax(180px, 1fr) auto;
+  grid-template-columns: repeat(6, max-content) minmax(180px, 1fr) auto;
   gap: 12px;
   align-items: center;
 }
