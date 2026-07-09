@@ -1012,6 +1012,10 @@ fn image_ext_from_url(url: &str) -> &str {
         ".jpg"
     } else if lower.contains(".webp") {
         ".webp"
+    } else if lower.contains(".webm") {
+        ".webm"
+    } else if lower.contains(".mp4") {
+        ".mp4"
     } else if lower.contains(".ico") {
         ".ico"
     } else {
@@ -1049,7 +1053,7 @@ fn backup_and_remove_existing_artwork(grid_dir: &Path, stem: &str) -> Result<(),
 }
 
 fn artwork_extensions() -> &'static [&'static str] {
-    &["png", "jpg", "jpeg", "webp", "ico"]
+    &["png", "jpg", "jpeg", "webp", "webm", "mp4", "ico"]
 }
 
 fn chrono_like_stamp() -> String {

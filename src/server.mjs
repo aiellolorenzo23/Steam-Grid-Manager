@@ -19,10 +19,12 @@ const mimeTypes = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".webm": "video/webm",
+  ".mp4": "video/mp4",
   ".ico": "image/x-icon",
   ".svg": "image/svg+xml"
 };
-const artworkExtensions = [".png", ".jpg", ".jpeg", ".webp", ".ico"];
+const artworkExtensions = [".png", ".jpg", ".jpeg", ".webp", ".webm", ".mp4", ".ico"];
 
 const server = http.createServer(async (req, res) => {
   try {

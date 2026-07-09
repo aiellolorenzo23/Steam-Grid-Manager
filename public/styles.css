@@ -336,10 +336,15 @@ select {
   background: #0b1118;
 }
 
-.poster img {
+.poster img,
+.poster video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.poster video {
+  display: block;
 }
 
 .poster span {
@@ -494,7 +499,9 @@ select {
   background: rgba(0, 0, 0, 0.18);
 }
 
-.art-card img {
+.art-card img,
+.art-card video,
+.media-missing {
   width: 100%;
   aspect-ratio: 2 / 3;
   object-fit: cover;
@@ -502,12 +509,30 @@ select {
   background: #0b1118;
 }
 
-.art-card[data-asset="heroes"] img {
+.art-card video {
+  display: block;
+}
+
+.media-missing {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.art-card[data-asset="heroes"] img,
+.art-card[data-asset="heroes"] video,
+.art-card[data-asset="heroes"] .media-missing {
   aspect-ratio: 16 / 7;
 }
 
 .art-card[data-asset="logos"] img,
-.art-card[data-asset="icons"] img {
+.art-card[data-asset="logos"] video,
+.art-card[data-asset="icons"] img,
+.art-card[data-asset="icons"] video,
+.art-card[data-asset="logos"] .media-missing,
+.art-card[data-asset="icons"] .media-missing {
   aspect-ratio: 1 / 1;
   object-fit: contain;
 }
@@ -637,10 +662,15 @@ select {
     #182432;
 }
 
-.asset-preview img {
+.asset-preview img,
+.asset-preview video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.asset-preview video {
+  display: block;
 }
 
 .asset-preview span {
@@ -671,7 +701,9 @@ select {
 }
 
 .asset-preview[data-kind="logos"] img,
-.asset-preview[data-kind="icons"] img {
+.asset-preview[data-kind="logos"] video,
+.asset-preview[data-kind="icons"] img,
+.asset-preview[data-kind="icons"] video {
   object-fit: contain;
   padding: 10px;
 }
@@ -711,10 +743,14 @@ select {
   min-height: 0;
 }
 
-.art-card[data-asset="gridHorizontal"] img {
+.art-card[data-asset="gridHorizontal"] img,
+.art-card[data-asset="gridHorizontal"] video,
+.art-card[data-asset="gridHorizontal"] .media-missing {
   aspect-ratio: 92 / 43;
 }
 
-.art-card[data-asset="gridVertical"] img {
+.art-card[data-asset="gridVertical"] img,
+.art-card[data-asset="gridVertical"] video,
+.art-card[data-asset="gridVertical"] .media-missing {
   aspect-ratio: 2 / 3;
 }

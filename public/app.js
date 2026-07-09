@@ -270,7 +270,7 @@ function renderGames() {
     const poster = game.artwork?.gridVertical || game.artwork?.gridHorizontal || "";
     return `
       <article class="game-card ${state.selectedGame?.id === game.id ? "active" : ""}" data-id="${escapeAttr(game.id)}">
-        <div class="poster ${poster ? "has-artwork" : ""}">${poster ? `<img src="${escapeAttr(localArtworkUrl(poster))}" alt="">` : `<span>${escapeHtml(initials(game.name))}</span>`}</div>
+        <div class="poster ${poster ? "has-artwork" : ""}">${poster ? renderLocalArtworkMedia(poster) : `<span>${escapeHtml(initials(game.name))}</span>`}</div>
         <footer>
           <strong>${escapeHtml(game.name)}</strong>
           <small>${escapeHtml(game.libraryLabel)}</small>
@@ -317,7 +317,7 @@ function renderExistingArtwork(game) {
     preview.querySelector("strong").textContent = config.label;
     preview.querySelector("small").textContent = label;
     frame.innerHTML = value
-      ? `<img src="${escapeAttr(localArtworkUrl(value))}" alt="">`
+      ? renderLocalArtworkMedia(value)
       : `<span>${escapeHtml(assetPlaceholder(assetType, game.name))}</span>`;
   });
 }
@@ -387,7 +387,6 @@ function buildSgdbFilters() {
   if (els.filterUntagged.checked) tags.push("untagged");
   if (els.filterStatic.checked) types.push("static");
   if (els.filterAnimated.checked) types.push("animated");
-  if (els.filterAnimated.checked && state.assetType !== "icons") mimes.push("image/webp");
   if (els.dimensionFilter.value) dimensions.push(els.dimensionFilter.value);
   return { tags, types, mimes, dimensions };
 }
@@ -395,7 +394,7 @@ function buildSgdbFilters() {
 function renderArtwork(assets) {
   els.artworkGrid.innerHTML = assets.map((asset, index) => `
     <article class="art-card" data-index="${index}" data-asset="${escapeAttr(state.assetType)}">
-      <img src="${escapeAttr(asset.thumb || asset.url)}" alt="">
+      ${renderAssetMedia(asset)}
       <button data-index="${index}">Applica</button>
     </article>
   `).join("");
@@ -406,6 +405,16 @@ function renderArtwork(assets) {
       await applyArtwork(asset.url);
     });
   });
+}
+
+function renderAssetMedia(asset) {
+  const url = assetMediaUrl(asset);
+  if (!url) return `<div class="media-missing">Preview non disponibile</div>`;
+  if (isVideoAsset(asset, url)) {
+    return `<video src="${escapeAttr(url)}" autoplay loop muted playsinline></video>`;
+  }
+  const fallback = assetUrl(asset);
+  return `<img src="${escapeAttr(url)}" alt=""${fallback && fallback !== url ? ` data-fallback="${escapeAttr(fallback)}"` : ""}>`;
 }
 
 async function applyArtwork(imageUrl) {
@@ -440,6 +449,14 @@ function updateSelectedArtwork(target) {
   renderModal();
   renderGames();
 }
+
+document.addEventListener("error", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.dataset.fallback) return;
+  const fallback = image.dataset.fallback;
+  delete image.dataset.fallback;
+  image.src = fallback;
+}, true);
 
 function assetLabel(assetType) {
   return ASSETS[assetType]?.label || "Artwork";
@@ -531,6 +548,45 @@ function localArtworkUrl(filePath) {
     return convertFileSrc(filePath);
   }
   return `/api/artwork/local?path=${encodeURIComponent(filePath)}`;
+}
+
+function renderLocalArtworkMedia(filePath) {
+  const url = localArtworkUrl(filePath);
+  if (isVideoPath(filePath)) {
+    return `<video src="${escapeAttr(url)}" autoplay loop muted playsinline></video>`;
+  }
+  return `<img src="${escapeAttr(url)}" alt="">`;
+}
+
+function assetMediaUrl(asset) {
+  return stringUrl(asset?.thumb)
+    || stringUrl(asset?.thumbnail)
+    || stringUrl(asset?.preview)
+    || assetUrl(asset);
+}
+
+function assetUrl(asset) {
+  return stringUrl(asset?.url)
+    || stringUrl(asset?.file)
+    || stringUrl(asset?.image)
+    || "";
+}
+
+function stringUrl(value) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  return value.url || value.webp || value.mp4 || value.webm || value.original || value.large || value.medium || value.small || "";
+}
+
+function isVideoAsset(asset, url) {
+  const mime = String(asset?.mime || asset?.mimetype || asset?.contentType || asset?.content_type || "").toLowerCase();
+  const path = url.split("?")[0].toLowerCase();
+  return mime.startsWith("video/") || isVideoPath(path);
+}
+
+function isVideoPath(value) {
+  const path = String(value).split("?")[0].toLowerCase();
+  return path.endsWith(".webm") || path.endsWith(".mp4") || path.endsWith(".mov");
 }
 
 function initials(name) {
